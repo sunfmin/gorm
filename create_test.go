@@ -1,6 +1,7 @@
 package gorm_test
 
 import (
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -8,7 +9,8 @@ import (
 
 func TestCreate(t *testing.T) {
 	float := 35.03554004971999
-	user := User{Name: "CreateUser", Age: 18, Birthday: time.Now(), UserNum: Num(111), PasswordHash: []byte{'f', 'a', 'k', '4'}, Latitude: float}
+	now := time.Now()
+	user := User{Name: "CreateUser", Age: 18, Birthday: &now, UserNum: Num(111), PasswordHash: []byte{'f', 'a', 'k', '4'}, Latitude: float}
 
 	if !DB.NewRecord(user) || !DB.NewRecord(&user) {
 		t.Error("User should be new record before create")
@@ -51,12 +53,39 @@ func TestCreate(t *testing.T) {
 
 	DB.Model(user).Update("name", "create_user_new_name")
 	DB.First(&user, user.Id)
-	if user.CreatedAt != newUser.CreatedAt {
+	if user.CreatedAt.Format(time.RFC3339Nano) != newUser.CreatedAt.Format(time.RFC3339Nano) {
 		t.Errorf("CreatedAt should not be changed after update")
 	}
 }
 
+type AutoIncrementUser struct {
+	User
+	Sequence uint `gorm:"AUTO_INCREMENT"`
+}
+
+func TestCreateWithAutoIncrement(t *testing.T) {
+	if dialect := os.Getenv("GORM_DIALECT"); dialect != "postgres" {
+		t.Skip("Skipping this because only postgres properly support auto_increment on a non-primary_key column")
+	}
+
+	DB.AutoMigrate(&AutoIncrementUser{})
+
+	user1 := AutoIncrementUser{}
+	user2 := AutoIncrementUser{}
+
+	DB.Create(&user1)
+	DB.Create(&user2)
+
+	if user2.Sequence-user1.Sequence != 1 {
+		t.Errorf("Auto increment should apply on Sequence")
+	}
+}
+
 func TestCreateWithNoGORMPrimayKey(t *testing.T) {
+	if dialect := os.Getenv("GORM_DIALECT"); dialect == "mssql" {
+		t.Skip("Skipping this because MSSQL will return identity only if the table has an Id column")
+	}
+
 	jt := JoinTable{From: 1, To: 2}
 	err := DB.Create(&jt).Error
 	if err != nil {
@@ -87,7 +116,7 @@ func TestCreateWithNoStdPrimaryKeyAndDefaultValues(t *testing.T) {
 
 	// We must fetch the value again, to have the default fields updated
 	// (We can't do this in the update statements, since sql default can be expressions
-	// And be different from the fields' type (eg. a time.Time fiels has a default value of "now()"
+	// And be different from the fields' type (eg. a time.Time fields has a default value of "now()"
 	DB.Model(Animal{}).Where(&Animal{Counter: an.Counter}).First(&an)
 
 	if an.Name != "galeone" {
@@ -105,7 +134,7 @@ func TestAnonymousScanner(t *testing.T) {
 		t.Errorf("Should be able to get anonymous scanner")
 	}
 
-	if !user2.IsAdmin() {
+	if !user2.Role.IsAdmin() {
 		t.Errorf("Should be able to get anonymous scanner")
 	}
 }
@@ -154,6 +183,6 @@ func TestOmitWithCreate(t *testing.T) {
 
 	if queryuser.BillingAddressID.Int64 != 0 || queryuser.ShippingAddressId == 0 ||
 		queryuser.CreditCard.ID != 0 || len(queryuser.Emails) != 0 {
-		t.Errorf("Should not create omited relationships")
+		t.Errorf("Should not create omitted relationships")
 	}
 }
